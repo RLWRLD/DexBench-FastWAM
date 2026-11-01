@@ -112,7 +112,10 @@ class LeRobotDatasetMetadata:
         if (self.root / "annotations").exists():
             self.annotations = load_annotations(self.root)
         self.episodes = load_episodes(self.root)
-        if self._version < packaging.version.parse("v2.1"):
+        # GR00T-flavoured LeRobot 2.1 sets (e.g. DexBench's) ship meta/stats.json without the per-episode
+        # meta/episodes_stats.jsonl; read them as 2.0 does. FastWAM computes its own normalization stats.
+        legacy_stats = not (self.root / "meta" / "episodes_stats.jsonl").exists() and (self.root / "meta" / "stats.json").exists()
+        if self._version < packaging.version.parse("v2.1") or legacy_stats:
             self.stats = load_stats(self.root)
             self.episodes_stats = backward_compatible_episodes_stats(self.stats, self.episodes)
         else:
