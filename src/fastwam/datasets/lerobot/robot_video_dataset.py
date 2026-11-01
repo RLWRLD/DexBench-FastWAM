@@ -22,6 +22,61 @@ logger = get_logger(__name__)
 
 DEFAULT_PROMPT = "A video recorded from a robot's point of view executing the following instruction: {task}"
 
+
+def compose_multi_camera(video: torch.Tensor, concat_multi_camera: Optional[str]) -> torch.Tensor:
+    """Lay out ``[num_cameras, T, C, H, W]`` frames as one ``[T, C, H', W']`` video.
+
+    ``"robotwin"`` places the first camera in a 256x320 top slot and the other two in 128x160 slots
+    below it (a 384x320 canvas); ``"horizontal"``/``"vertical"`` concatenate the cameras side by side.
+    Inference servers call this to build exactly the canvas the model was trained on.
+    """
+    num_cameras = video.shape[0]
+    if concat_multi_camera == "robotwin":
+        if num_cameras != 3:
+            raise ValueError(
+                f"`concat_multi_camera='robotwin'` requires exactly 3 cameras, got {num_cameras}"
+            )
+        cam_top = transforms_F.resize(
+            video[0],
+            size=[256, 320],
+            interpolation=transforms_F.InterpolationMode.BILINEAR,
+            antialias=True,
+        )  # [T_video, C, 256, 320]
+        cam_left = transforms_F.resize(
+            video[1],
+            size=[128, 160],
+            interpolation=transforms_F.InterpolationMode.BILINEAR,
+            antialias=True,
+        )  # [T_video, C, 128, 160]
+        cam_right = transforms_F.resize(
+            video[2],
+            size=[128, 160],
+            interpolation=transforms_F.InterpolationMode.BILINEAR,
+            antialias=True,
+        )  # [T_video, C, 128, 160]
+        bottom = torch.cat([cam_left, cam_right], dim=-1)  # [T_video, C, 128, 320]
+        return torch.cat([cam_top, bottom], dim=-2)  # [T_video, C, 384, 320]
+    if num_cameras > 1:
+        if concat_multi_camera == "horizontal":
+            return torch.cat([video[i] for i in range(num_cameras)], dim=-1)  # [T_video, C, H, num_cameras*W]
+        if concat_multi_camera == "vertical":
+            return torch.cat([video[i] for i in range(num_cameras)], dim=-2)  # [T_video, C, num_cameras*H, W]
+        raise ValueError(
+            f"Invalid concat_multi_camera: {concat_multi_camera}. "
+            "Expected one of: horizontal, vertical, robotwin."
+        )
+    return video.squeeze(0)  # [T_video, C, H, W]
+
+
+def to_model_frames(video: torch.Tensor, concat_multi_camera: Optional[str], video_size) -> torch.Tensor:
+    """``[num_cameras, T, C, H, W]`` frames in [0, 1] -> the model's ``[T, C, H, W]`` input in [-1, 1]."""
+    video = compose_multi_camera(video, concat_multi_camera)
+    # final resize and normalization
+    video = ResizeSmallestSideAspectPreserving(args={"img_w": video_size[1], "img_h": video_size[0]})(video)
+    video = CenterCrop(args={"img_w": video_size[1], "img_h": video_size[0]})(video)
+    return Normalize(args={"mean": 0.5, "std": 0.5})(video)  # [T_video, C, H, W]
+
+
 class RobotVideoDataset(torch.utils.data.Dataset):
     base_dataset_cls = BaseLerobotDataset
 
@@ -82,15 +137,6 @@ class RobotVideoDataset(torch.utils.data.Dataset):
         self.concat_multi_camera = concat_multi_camera
         self.override_instruction = override_instruction
 
-        self.resize_transform = ResizeSmallestSideAspectPreserving(
-            args={"img_w": self.video_size[1], "img_h": self.video_size[0]},
-        )
-        self.crop_transform = CenterCrop(
-            args={"img_w": self.video_size[1], "img_h": self.video_size[0]},
-        )
-        self.normalize_transform = Normalize(
-            args={"mean": 0.5, "std": 0.5},
-        )
         if processor is not None:
             if isinstance(processor, DictConfig):
                 processor = instantiate(processor)
@@ -122,6 +168,10 @@ class RobotVideoDataset(torch.utils.data.Dataset):
         
     def __len__(self):
         return len(self.lerobot_dataset)
+
+    def to_model_frames(self, video: torch.Tensor) -> torch.Tensor:
+        """``[num_cameras, T, C, H, W]`` frames in [0, 1] -> the model's ``[T, C, H, W]`` input in [-1, 1]."""
+        return to_model_frames(video, self.concat_multi_camera, self.video_size)
 
     def _get(self, idx):
         sample_idx = idx
@@ -165,48 +215,7 @@ class RobotVideoDataset(torch.utils.data.Dataset):
             image_is_pad = image_is_pad[self.video_sample_indices]
 
         video = video.view(num_cameras, T_video, C, H, W)  # [num_cameras, T_video, C, H, W]
-        if self.concat_multi_camera == "robotwin":
-            if num_cameras != 3:
-                raise ValueError(
-                    f"`concat_multi_camera='robotwin'` requires exactly 3 cameras, got {num_cameras}"
-                )
-            cam_top = transforms_F.resize(
-                video[0],
-                size=[256, 320],
-                interpolation=transforms_F.InterpolationMode.BILINEAR,
-                antialias=True,
-            )  # [T_video, C, 256, 320]
-            cam_left = transforms_F.resize(
-                video[1],
-                size=[128, 160],
-                interpolation=transforms_F.InterpolationMode.BILINEAR,
-                antialias=True,
-            )  # [T_video, C, 128, 160]
-            cam_right = transforms_F.resize(
-                video[2],
-                size=[128, 160],
-                interpolation=transforms_F.InterpolationMode.BILINEAR,
-                antialias=True,
-            )  # [T_video, C, 128, 160]
-            bottom = torch.cat([cam_left, cam_right], dim=-1)  # [T_video, C, 128, 320]
-            video = torch.cat([cam_top, bottom], dim=-2)  # [T_video, C, 384, 320]
-        elif num_cameras > 1:
-            if self.concat_multi_camera == "horizontal":
-                video = torch.cat([video[i] for i in range(num_cameras)], dim=-1)  # [T_video, C, H, num_cameras*W]
-            elif self.concat_multi_camera == "vertical":
-                video = torch.cat([video[i] for i in range(num_cameras)], dim=-2)  # [T_video, C, num_cameras*H, W]
-            else:
-                raise ValueError(
-                    f"Invalid concat_multi_camera: {self.concat_multi_camera}. "
-                    "Expected one of: horizontal, vertical, robotwin."
-                )
-        else:
-            video = video.squeeze(0)  # [T_video, C, H, W]
-
-        # final resize and normalization
-        video = self.resize_transform(video)
-        video = self.crop_transform(video)
-        video = self.normalize_transform(video)  # [T_video, C, H, W]
+        video = self.to_model_frames(video)  # [T_video, C, H, W]
 
         video = video.permute(1, 0, 2, 3) # [C, T_video, H, W], range [-1, 1]
 
