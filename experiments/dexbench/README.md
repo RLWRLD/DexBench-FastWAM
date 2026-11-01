@@ -106,7 +106,7 @@ Run [serve.py](serve.py) on the machine used for model inference, from the repos
 ```bash
 CUDA_VISIBLE_DEVICES=0 python experiments/dexbench/serve.py \
   --run-dir runs/dexbench_ga_wrist_joint_3cam_384_1e-4/<run_id> \
-  --host 127.0.0.1 --port 5816
+  --host 127.0.0.1 --port 5815
 ```
 
 It loads the run's `config.yaml`, `dataset_stats.json` and latest `checkpoints/weights/step_*.pt`

@@ -11,7 +11,7 @@ normalization), ``dataset_stats.json`` and ``checkpoints/weights/step_*.pt``. Ea
 through the training image transforms and the training canvas layout (``to_model_frames``), so the
 model sees the canvas it was trained on.
 
-    python experiments/dexbench/serve.py --run-dir runs/<task>/<run_id> --port 5816
+    python experiments/dexbench/serve.py --run-dir runs/<task>/<run_id> --port 5815
 """
 
 import argparse
@@ -260,7 +260,7 @@ def main() -> None:
     p.add_argument("--run-dir", type=Path, required=True, help="training run with config.yaml and dataset_stats.json")
     p.add_argument("--checkpoint", type=Path, help="weights file; default: the run's latest checkpoints/weights/step_*.pt")
     p.add_argument("--host", default="127.0.0.1", help="keep it off 0.0.0.0 unless the port is firewalled")
-    p.add_argument("--port", type=int, default=5816)
+    p.add_argument("--port", type=int, default=5815)
     p.add_argument("--api-token-file", type=Path, help="file holding a bearer token every request must carry")
     p.add_argument("--num-inference-steps", type=int, default=10)
     p.add_argument("--seed", type=int, default=42, help="noise seed for every request (default 42)")
