@@ -1,0 +1,31 @@
+# @package _global_
+
+# FastWAM Joint on DexBench RBY1-Wuji2 with the GA wrist-camera layout. Global batch 256 for 16,000 updates:
+# experiments/dexbench/train.sh sets gradient_accumulation_steps from the GPU count so that
+# batch_size x GPUs x gradient_accumulation_steps = 256.
+
+defaults:
+  - override /data: dexbench_ga_wrist_3cam
+  - override /model: fastwam_joint
+  - _self_
+
+# dataloading (per GPU)
+batch_size: 4
+num_workers: 8
+
+model:
+  mot_checkpoint_mixed_attn: false
+
+# scheduler: 5% linear warmup, then cosine to 1% of the peak (the trainer's fixed shape)
+lr_scheduler_type: "cosine"
+learning_rate: 1e-4
+num_epochs: 1
+max_steps: 16000
+log_every: 10
+save_every: 2000
+eval_every: 0
+
+# training
+gradient_accumulation_steps: 8
+weight_decay: 1e-2
+resume: null

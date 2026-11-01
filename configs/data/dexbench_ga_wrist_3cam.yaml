@@ -1,0 +1,59 @@
+# DexBench RBY1-Wuji2, GA wrist-camera layout: left ego camera on top, left and right wrist cameras below
+# (the RoboTwin 3-camera canvas, 384x320). Data: DexBench 62-joint LeRobot 2.1 sets with four cameras at
+# 320x180 (`lerobot/gr00t_62d_320x180_4cam`); see experiments/dexbench/README.md.
+train:
+  _target_: fastwam.datasets.lerobot.robot_video_dataset.RobotVideoDataset
+  dataset_dirs:
+    - ./data/dexbench/gr00t_62d_320x180_4cam
+  shape_meta:
+    images:
+      - key: camera_ego_left
+        raw_shape: [3, 180, 320]
+        shape: [3, 180, 320]
+      - key: camera_wrist_left
+        raw_shape: [3, 180, 320]
+        shape: [3, 180, 320]
+      - key: camera_wrist_right
+        raw_shape: [3, 180, 320]
+        shape: [3, 180, 320]
+    action:
+      - key: default
+        raw_shape: 62 # absolute joint positions, rad
+        shape: 62
+    state:
+      - key: default
+        raw_shape: 62
+        shape: 62
+  num_frames: 33
+  global_sample_stride: 1
+  action_video_freq_ratio: 4 # 32 action, 9 video frames
+  video_size: [384, 320] # final resize video
+  camera_key: null
+  val_set_proportion: 0.0
+  is_training_set: true
+  pretrained_norm_stats: null
+  skip_padding_as_possible: false
+  concat_multi_camera: "robotwin"
+  processor:
+    _target_: fastwam.datasets.lerobot.processors.fastwam_processor.FastWAMProcessor
+    shape_meta: ${data.train.shape_meta}
+    num_obs_steps: ${data.train.num_frames}
+    num_output_cameras: 3
+    action_output_dim: 62
+    proprio_output_dim: 62
+
+    action_state_transforms: null
+    use_stepwise_action_norm: false
+    norm_default_mode: "min/max"
+    norm_exception_mode: null
+
+    action_state_merger:
+      _target_: fastwam.datasets.lerobot.transforms.action_state_merger.ConcatLeftAlign
+
+    # The frames are already 320x180; the canvas layout resizes each camera into its slot.
+    train_transforms:
+      - _target_: fastwam.datasets.lerobot.transforms.image.ToTensor
+    val_transforms:
+      - _target_: fastwam.datasets.lerobot.transforms.image.ToTensor
+  text_embedding_cache_dir: ./data/text_embeds_cache/dexbench
+  context_len: 128
