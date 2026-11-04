@@ -34,6 +34,12 @@ train:
   pretrained_norm_stats: null
   skip_padding_as_possible: false
   concat_multi_camera: "robotwin"
+  # Training only, as the DexBench Cosmos3-Nano recipe: one ColorJitter draw per sample on the composed
+  # 384x320 canvas (every video frame and camera alike); null turns it off.
+  color_jitter:
+    brightness: 0.3
+    contrast: 0.3
+    saturation: 0.3
   processor:
     _target_: fastwam.datasets.lerobot.processors.fastwam_processor.FastWAMProcessor
     shape_meta: ${data.train.shape_meta}

@@ -6,6 +6,7 @@ import numpy as np
 import traceback
 import torch
 import torchvision.transforms.functional as transforms_F
+import torchvision.transforms.v2 as transforms_v2
 from contextlib import contextmanager
 
 from omegaconf import DictConfig, OmegaConf
@@ -70,7 +71,11 @@ def compose_multi_camera(video: torch.Tensor, concat_multi_camera: Optional[str]
 
 def to_model_frames(video: torch.Tensor, concat_multi_camera: Optional[str], video_size) -> torch.Tensor:
     """``[num_cameras, T, C, H, W]`` frames in [0, 1] -> the model's ``[T, C, H, W]`` input in [-1, 1]."""
-    video = compose_multi_camera(video, concat_multi_camera)
+    return canvas_to_model_frames(compose_multi_camera(video, concat_multi_camera), video_size)
+
+
+def canvas_to_model_frames(video: torch.Tensor, video_size) -> torch.Tensor:
+    """A composed ``[T, C, H, W]`` canvas in [0, 1] -> the model's ``[T, C, H, W]`` input in [-1, 1]."""
     # final resize and normalization
     video = ResizeSmallestSideAspectPreserving(args={"img_w": video_size[1], "img_h": video_size[0]})(video)
     video = CenterCrop(args={"img_w": video_size[1], "img_h": video_size[0]})(video)
@@ -102,7 +107,13 @@ class RobotVideoDataset(torch.utils.data.Dataset):
         override_instruction: Optional[str] = None, # whether to hardcode a specific instruction for all samples, for debugging
         tolerance_s: Optional[float] = None,
         video_backend: Optional[str] = None,
+        color_jitter: Optional[dict] = None,
     ):
+        """``color_jitter`` (e.g. ``{brightness: 0.3, contrast: 0.3, saturation: 0.3}``) is torchvision's
+        ``ColorJitter`` applied to the composed multi-camera canvas, one draw per sample shared by every
+        video frame and camera of it, before the final resize and normalization. It is a training
+        augmentation: a dataset with ``is_training_set=False`` ignores it, and inference servers build
+        the canvas with ``to_model_frames``, which never jitters."""
         self.lerobot_dataset = self.base_dataset_cls(
             dataset_dirs=dataset_dirs,
             shape_meta=OmegaConf.to_container(shape_meta, resolve=True),
@@ -136,6 +147,11 @@ class RobotVideoDataset(torch.utils.data.Dataset):
         self.max_padding_retry = max_padding_retry
         self.concat_multi_camera = concat_multi_camera
         self.override_instruction = override_instruction
+        self.color_jitter = (
+            transforms_v2.ColorJitter(**(OmegaConf.to_container(color_jitter) if isinstance(color_jitter, DictConfig) else color_jitter))
+            if color_jitter and is_training_set
+            else None
+        )
 
         if processor is not None:
             if isinstance(processor, DictConfig):
@@ -215,7 +231,10 @@ class RobotVideoDataset(torch.utils.data.Dataset):
             image_is_pad = image_is_pad[self.video_sample_indices]
 
         video = video.view(num_cameras, T_video, C, H, W)  # [num_cameras, T_video, C, H, W]
-        video = self.to_model_frames(video)  # [T_video, C, H, W]
+        canvas = compose_multi_camera(video, self.concat_multi_camera)  # [T_video, C, H', W'] in [0, 1]
+        if self.color_jitter is not None:
+            canvas = self.color_jitter(canvas)  # one draw for the whole canvas, every frame
+        video = canvas_to_model_frames(canvas, self.video_size)  # [T_video, C, H, W]
 
         video = video.permute(1, 0, 2, 3) # [C, T_video, H, W], range [-1, 1]
 

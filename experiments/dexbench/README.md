@@ -94,7 +94,7 @@ for example `max_steps=30000` or `wandb.enabled=true wandb.workspace=<entity>`.
 | Learning rate | 1e-4 for the DiTs and the proprio encoder, 5% linear warmup, cosine to 1e-6 |
 | Precision | bf16, DeepSpeed ZeRO-2 |
 | Flow shifts | video 5.0, action 1.0 (training and inference) |
-| Image augmentation | none |
+| Image augmentation | `color_jitter` brightness 0.3, contrast 0.3, saturation 0.3: torchvision `ColorJitter`, one draw per sample on the composed canvas, training only (the DexBench Cosmos3-Nano recipe's setting); `data.train.color_jitter=null` turns it off |
 
 Checkpoints go to `runs/dexbench_ga_wrist_joint_3cam_384_1e-4/<run_id>/checkpoints/weights/step_*.pt`.
 `train.sh` launches one node; set `NUM_GPUS` and `BATCH_SIZE` so that their product divides 256.
@@ -121,7 +121,8 @@ guidance, and noise seed 42 for every request.
 
 The client area-downscales each 640×360 render to 320×180 before encoding; the server builds the
 canvas with the training code (`to_model_frames` in `fastwam/datasets/lerobot/robot_video_dataset.py`),
-so a frame the client sends reaches the model as the training data did. Keep joint and camera bindings,
+so a frame the client sends reaches the model as the training data did (before the training-only colour
+jitter, which the server never applies). Keep joint and camera bindings,
 task settings, seeds and the execution horizon (how many of the 32 actions to execute before asking
 again) in DexBench. The simulator must render the wrist cameras.
 
@@ -133,6 +134,7 @@ DEXBENCH_TEST_DATASET=/path/to/gr00t_62d_320x180_4cam \
 ```
 
 A few episodes are enough (trim `meta/episodes.jsonl` and `meta/info.json`). The tests build a training
-sample, check that the server's canvas equals the training canvas bit for bit and that the server's
+sample, check that the server's canvas equals the training canvas without colour jitter bit for bit, that the
+jitter is one draw on the training canvas only, and that the server's
 state and action units match training, and run the HTTP endpoints against a stub model. They need
 neither a GPU nor the model weights.
